@@ -1,8 +1,6 @@
 ---
 name: feishu-write
 description: 当用户需要将本地 Markdown 文件发布到飞书文档时使用。用户说"发布到飞书"、"写入飞书文档"、"上传到知识库"、"上传到文件夹"时触发。根据用户提供的参数自动选择目标位置。
-allowed-tools: Read, Write, Edit, Bash
-# model: (待测试后填入推荐模型)
 ---
 
 # 飞书文档写入
