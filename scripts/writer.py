@@ -233,6 +233,45 @@ class FeishuWriter:
 
         return uploaded_count, all_success
 
+    def prepend_file_attachment(self, document_id: str, file_path: str) -> Dict[str, Any]:
+        """
+        将文件作为附件插入到文档最前面（三步流程）
+
+        步骤1：创建空文件块 → 拿到内层 block_id
+        步骤2：上传文件，parent_node = 内层 block_id → 拿到 file_token
+        步骤3：PATCH 内层块，replace_file: {token: file_token}
+
+        Args:
+            document_id: 文档 ID（obj_token）
+            file_path: 本地文件路径
+
+        Returns:
+            {"success": bool, "message": str}
+        """
+        path = Path(file_path)
+        if not path.exists():
+            return {"success": False, "message": f"文件不存在: {file_path}"}
+
+        # 初始化 uploader
+        if not self.uploader:
+            self.uploader = FeishuImageUploader(self.auth, path.parent)
+
+        # 步骤1：创建空文件块，返回内层 block_type 23 的 block_id
+        inner_block_id = self.doc_writer.create_file_block(document_id, document_id, index=0)
+        if not inner_block_id:
+            return {"success": False, "message": f"创建文件块失败: {path.name}"}
+
+        # 步骤2：上传文件，parent_node = 内层 block_id
+        file_token = self.uploader.upload_file(str(path), inner_block_id)
+        if not file_token:
+            return {"success": False, "message": f"文件上传失败: {path.name}"}
+
+        # 步骤3：PATCH 内层块，绑定 file_token
+        if not self.doc_writer.patch_file_block(document_id, inner_block_id, file_token):
+            return {"success": False, "message": f"绑定文件块失败: {path.name}"}
+
+        return {"success": True, "message": f"文件附件已插入文档最前面: {path.name}"}
+
     def update_document(self, document_id: str, md_path: str) -> Dict[str, Any]:
         """更新已有文档"""
         path = Path(md_path)

@@ -214,6 +214,79 @@ class FeishuDocWriter:
 
         return result.get("data", {}).get("node", {}).get("space_id")
 
+    def create_file_block(self, document_id: str, block_id: str, index: int = 0) -> Optional[str]:
+        """
+        在文档指定位置创建空文件块，返回内层 block_type 23 的 block_id
+
+        注意：file 对象必须为空 {}，不能传 name 或 file_token（会导致 1770001）
+        创建后生成两层结构：外层 block_type 33（View）→ 内层 block_type 23（文件块）
+        需要后续调用 upload_file + patch_file_block 才能正确显示附件。
+
+        Args:
+            document_id: 文档 ID
+            block_id: 父块 ID
+            index: 插入位置（0 表示最前面）
+
+        Returns:
+            内层文件块（block_type 23）的 block_id，失败返回 None
+        """
+        url = f"{self.BASE_URL}/docx/v1/documents/{document_id}/blocks/{block_id}/children"
+        data = {
+            "children": [
+                {
+                    "block_type": 23,
+                    "file": {}
+                }
+            ],
+            "index": index
+        }
+
+        try:
+            resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            result = resp.json()
+
+            if result.get("code") != 0:
+                print(f"警告: 创建文件块失败: {result.get('msg')} (code={result.get('code')})")
+                return None
+
+            # 外层是 block_type 33（View），内层 children[0] 才是 block_type 23（文件块）
+            outer = result.get("data", {}).get("children", [])
+            if outer and outer[0].get("children"):
+                return outer[0]["children"][0]
+            return None
+        except Exception as e:
+            print(f"警告: 创建文件块异常: {e}")
+            return None
+
+    def patch_file_block(self, document_id: str, inner_block_id: str, file_token: str) -> bool:
+        """
+        用 replace_file 将 file_token 绑定到内层文件块（block_type 23）
+
+        Args:
+            document_id: 文档 ID
+            inner_block_id: 内层 block_type 23 的 block_id
+            file_token: 上传文件后获得的 file_token
+
+        Returns:
+            是否成功
+        """
+        url = f"{self.BASE_URL}/docx/v1/documents/{document_id}/blocks/{inner_block_id}"
+        data = {"replace_file": {"token": file_token}}
+
+        try:
+            resp = requests.patch(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            result = resp.json()
+
+            if result.get("code") != 0:
+                print(f"警告: 绑定文件块失败: {result.get('msg')} (code={result.get('code')})")
+                return False
+            return True
+        except Exception as e:
+            print(f"警告: 绑定文件块异常: {e}")
+            return False
+
     def create_image_block(self, document_id: str, block_id: str) -> Optional[str]:
         """
         创建空的图片块占位符

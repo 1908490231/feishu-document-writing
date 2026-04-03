@@ -1,11 +1,12 @@
 # 飞书文档写入工具
 
-将本地 Markdown 文件一键发布到飞书文档。
+一站式飞书内容发布工具。支持将 Markdown 内容解析为飞书文档块（含标题、代码块、表格、图片自动上传等），也支持将任意格式文件（HTML、PDF、TXT 等）作为附件插入文档。可写入知识库、云文件夹或个人空间，单文件或批量均可。
 
 ## 功能特性
 
 - 支持写入到我的空间、指定文件夹、知识库
 - 自动上传本地图片和网络图片
+- **支持上传文件附件（HTML、PDF 等），自动插入到文档最前面**
 - 保留代码块语法高亮
 - 支持表格解析与写入
 - 支持单个文件或批量处理
@@ -89,6 +90,9 @@ python -m scripts.feishu_writer ./doc.md --target wiki
 # 写入到指定知识库
 python -m scripts.feishu_writer ./doc.md --target wiki --wiki-token FWn9wEcZhixVLrk2z5scBx8DnTe
 
+# 同时上传附件文件到文档最前面
+python -m scripts.feishu_writer ./doc.md --target wiki --attachment ./template.html
+
 # 批量处理目录
 python -m scripts.feishu_writer ./docs/ --target folder --folder-token LlqxfXXXXXX
 ```
@@ -101,6 +105,7 @@ python -m scripts.feishu_writer ./docs/ --target folder --folder-token LlqxfXXXX
 |------|------|------|--------|
 | `path` | - | MD 文件或目录路径 | 必填 |
 | `--target` | `-t` | 目标位置 (space/folder/wiki) | space |
+| `--attachment` | `-a` | 附件文件路径，上传并插入到文档最前面 | - |
 | `--folder-token` | `-f` | 文件夹 token | - |
 | `--wiki-token` | `-w` | 知识库 node_token（可在 .env 中配置默认值） | - |
 | `--on-duplicate` | - | 重复处理 (ask/update/skip/new) | ask |
@@ -152,6 +157,22 @@ Space ID 是知识库的内部标识（数字），可通过以下方式获取�
 | 图片 | `![alt](path)` | ✓ |
 | 分割线 | `---` | ✓ |
 | 表格 | `| A | B |` | ✓ |
+
+## 文件附件上传
+
+使用 `--attachment` 参数可将本地文件作为附件插入到文档内容的最前面：
+
+```bash
+python -m scripts.feishu_writer ./article.md --target wiki --attachment ./template.html
+```
+
+附件会以可下载的文件块形式出现在文档顶部，用户点击即可下载原始文件。
+
+**默认行为**：
+- `.md` 文件 → 解析内容写入飞书文档（主流程）
+- 其他所有文件类型（TXT、HTML、PDF、DOCX、ZIP 等）→ 上传为附件
+
+**附件支持格式**：HTML、PDF、Word、Excel、PPT、TXT、ZIP 等常见格式均可上传，飞书会按文件类型显示对应图标。
 
 ## 作为 Claude Code 技能使用
 
@@ -274,6 +295,73 @@ PATCH /docx/v1/documents/{document_id}/blocks/{block_id}
 3. **必须使用 `replace_image`** - 这是飞书专门为图片块设计的更新字段
 
 这个三步流程是飞书 docx 文档 API 的设计特点，官方文档中没有明确说明，需要通过实践摸索。
+
+### 飞书 docx 文档文件附件上传流程
+
+文件附件块（block_type 23）的创建与图片类似，同样是**三步操作**：
+
+#### 步骤 1：创建空文件块
+
+```bash
+POST /docx/v1/documents/{document_id}/blocks/{block_id}/children
+```
+
+```json
+{
+  "children": [{ "block_type": 23, "file": {} }],
+  "index": 0
+}
+```
+
+**注意**：`file` 必须为空 `{}`，**不能传 `name` 或 `file_token`**，否则返回 1770001 错误。
+
+API 会返回两层结构：
+- 外层：block_type **33**（View 容器，程序直接返回这一层）
+- 内层：block_type **23**（真正的文件块，在 `children[0].children[0]` 里）
+
+取内层的 `block_id` 用于后续步骤。
+
+#### 步骤 2：上传文件
+
+```bash
+POST /drive/v1/medias/upload_all
+```
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `file` | 二进制文件 | 文件内容 |
+| `file_name` | 文件名 | 如 `template.html` |
+| `parent_type` | `docx_file` | **必须是 docx_file** |
+| `parent_node` | 内层文件块 ID | 步骤 1 中取到的内层 block_id |
+| `size` | 文件大小 | 字节数 |
+
+**必须使用 `MultipartEncoder`**（`requests_toolbelt`），使用 `requests` 原生 multipart 会导致文件不完整。
+
+返回值中包含 `file_token`。
+
+#### 步骤 3：绑定 file_token 到文件块
+
+```bash
+PATCH /docx/v1/documents/{document_id}/blocks/{inner_block_id}
+```
+
+```json
+{
+  "replace_file": {
+    "token": "步骤 2 返回的 file_token"
+  }
+}
+```
+
+完成后文件名和 token 自动填充，附件可正常下载。
+
+#### 文件附件常见错误
+
+| 错误码 | 错误信息 | 原因 |
+|--------|----------|------|
+| 400 / 1770001 | invalid param | 创建块时 `file` 对象中传了 `name` 字段 |
+| 附件显示"上传失败" | - | 上传时 `parent_node` 用了文档 ID 而非内层 block_id |
+| 附件显示"上传失败" | - | 缺少第三步 PATCH（file.token 仍为空） |
 
 ### 飞书 docx 文档表格创建流程
 

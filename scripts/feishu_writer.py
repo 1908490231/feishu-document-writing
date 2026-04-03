@@ -49,6 +49,7 @@ def main():
     arg_parser.add_argument("--folder-token", "-f", help="文件夹 token")
     arg_parser.add_argument("--wiki-token", "-w", help="知识库 token")
     arg_parser.add_argument("--no-check-duplicate", action="store_true", help="不检查重复文档")
+    arg_parser.add_argument("--attachment", "-a", help="上传附件文件到文档最前面（本地文件路径）")
     arg_parser.add_argument(
         "--on-duplicate",
         choices=["ask", "update", "skip", "new"],
@@ -173,6 +174,14 @@ def main():
                     print(f"  链接: https://feishu.cn/wiki/{node_token}")
                 elif doc_id:
                     print(f"  链接: https://feishu.cn/docx/{doc_id}")
+
+                # 插入附件到文档最前面
+                if args.attachment and doc_id:
+                    attach_result = writer.prepend_file_attachment(doc_id, args.attachment)
+                    if attach_result.get("success"):
+                        print(f"  [附件] {attach_result.get('message')}")
+                    else:
+                        print(f"  [附件失败] {attach_result.get('message')}")
             else:
                 fail_count += 1
                 print(f"  [FAIL] {result.get('message')}")

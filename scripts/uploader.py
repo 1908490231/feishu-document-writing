@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
+from requests_toolbelt import MultipartEncoder
 
 from .auth import FeishuAuth
 
@@ -107,6 +108,50 @@ class FeishuImageUploader:
 
         print(f"警告: 图片不存在 - {path}")
         return None
+
+    def upload_file(self, file_path: str, document_id: str) -> Optional[str]:
+        """
+        上传任意文件到飞书文档（用于文档附件）
+
+        Args:
+            file_path: 本地文件路径
+            document_id: 目标文档 token（docx token）
+
+        Returns:
+            file_token 或 None（失败时）
+        """
+        path = Path(file_path)
+        if not path.exists():
+            print(f"警告: 文件不存在 - {file_path}")
+            return None
+
+        file_size = path.stat().st_size
+
+        try:
+            with open(path, "rb") as f:
+                form = MultipartEncoder({
+                    "file_name": path.name,
+                    "parent_type": "docx_file",
+                    "parent_node": document_id,
+                    "size": str(file_size),
+                    "file": (path.name, f, "application/octet-stream")
+                })
+                headers = {
+                    "Authorization": f"Bearer {self.auth.get_token()}",
+                    "Content-Type": form.content_type
+                }
+                resp = requests.post(self.UPLOAD_URL, headers=headers, data=form, timeout=30)
+                resp.raise_for_status()
+                result = resp.json()
+
+                if result.get("code") != 0:
+                    print(f"警告: 文件上传失败 - {file_path}: {result.get('msg')}")
+                    return None
+
+                return result.get("data", {}).get("file_token")
+        except Exception as e:
+            print(f"警告: 文件上传异常 - {file_path}: {e}")
+            return None
 
     def upload(self, image_source: str, parent_node: str) -> Optional[str]:
         """

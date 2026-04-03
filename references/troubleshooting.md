@@ -150,3 +150,121 @@
 **解决方案**：
 - 程序已内置分批处理（每次最多 50 个 Block）
 - 如果仍遇到此错误，请确保使用最新版本
+
+## 文件附件上传相关
+
+### 文档中显示"视频或文件上传失败，无法查看"
+
+**根本原因**：文件附件块（block_type 23）的创建是一个**三步流程**，缺少任何一步都会导致附件无法正常显示。
+
+**正确的三步流程**：
+
+```
+步骤1：创建空文件块 → 拿到内层 block_id
+步骤2：上传文件，parent_node = 内层 block_id → 拿到 file_token
+步骤3：PATCH 内层块，replace_file: {token: file_token} → 文件正确绑定
+```
+
+**详细说明**：
+
+当你调用创建子块接口 `POST /docx/v1/documents/{doc_id}/blocks/{doc_id}/children` 时，传入 `{"block_type": 23, "file": {}}` 会生成两层结构：
+- 外层：block_type **33**（View 容器块，程序返回的就是这一层）
+- 内层：block_type **23**（真正的文件块，在外层的 `children[0]` 里）
+
+内层块初始状态 `file.token` 为空，需要先上传文件、再 PATCH 才能填充。
+
+**Python 示例**：
+
+```python
+import requests
+from requests_toolbelt import MultipartEncoder
+
+# 步骤1：创建空文件块（注意：file 必须为空 {}，不能传 name 或 file_token）
+resp = requests.post(
+    f'{BASE_URL}/docx/v1/documents/{doc_id}/blocks/{doc_id}/children',
+    headers=json_headers,
+    json={'children': [{'block_type': 23, 'file': {}}], 'index': 0}
+)
+inner_block_id = resp.json()['data']['children'][0]['children'][0]
+
+# 步骤2：上传文件，parent_node 必须是内层 block_id（不是文档 ID）
+with open(file_path, 'rb') as f:
+    form = MultipartEncoder({
+        'file_name': file_name,
+        'parent_type': 'docx_file',
+        'parent_node': inner_block_id,   # ← 关键：用内层块 ID
+        'size': str(file_size),
+        'file': (file_name, f, 'application/octet-stream')
+    })
+    up_resp = requests.post(
+        f'{BASE_URL}/drive/v1/medias/upload_all',
+        headers={'Authorization': f'Bearer {token}', 'Content-Type': form.content_type},
+        data=form
+    )
+file_token = up_resp.json()['data']['file_token']
+
+# 步骤3：PATCH 内层块，绑定文件
+requests.patch(
+    f'{BASE_URL}/docx/v1/documents/{doc_id}/blocks/{inner_block_id}',
+    headers=json_headers,
+    json={'replace_file': {'token': file_token}}
+)
+```
+
+---
+
+### "invalid param"（错误码 1770001）出现在创建文件块时
+
+**原因**：创建文件块时在 `file` 对象中传入了 `name` 字段。飞书 API **不支持**在创建阶段通过 `name` 指定文件名，`name` 会在步骤3 PATCH 时由 `replace_file` 自动从上传文件中读取。
+
+**错误示例**：
+```json
+// ❌ 会导致 1770001
+{"block_type": 23, "file": {"file_token": "xxx", "name": "test.html"}}
+
+// ❌ 也会导致 1770001（即使 name 为空字符串）
+{"block_type": 23, "file": {"file_token": "xxx", "name": ""}}
+```
+
+**正确示例**：
+```json
+// ✅ 创建时 file 必须为空对象
+{"block_type": 23, "file": {}}
+```
+
+---
+
+### 上传文件后附件仍显示失败（file.token 为空）
+
+**原因**：上传时 `parent_node` 使用了**文档 ID** 而不是**内层文件块的 block_id**。
+
+| 上传方式 | 结果 |
+|---------|------|
+| `parent_node = doc_id` | 上传成功（有 file_token），但块的 token 不会自动填充 |
+| `parent_node = 内层 block_id` | 上传成功，file_token 可正确通过 PATCH 绑定到块 |
+
+两种方式上传 API 都返回 code=0，区别在于后续 PATCH 是否能正常工作。
+
+---
+
+### 上传接口必须使用 MultipartEncoder
+
+**原因**：飞书 `drive/v1/medias/upload_all` 对 multipart/form-data 的格式要求较严格，使用 `requests` 原生的 `files=` 参数方式可能导致上传成功但内容不完整（文件可下载但打开后为空）。
+
+**正确依赖**：
+```bash
+pip install requests-toolbelt
+```
+
+```python
+from requests_toolbelt import MultipartEncoder
+
+form = MultipartEncoder({
+    'file_name': 'test.html',
+    'parent_type': 'docx_file',
+    'parent_node': inner_block_id,
+    'size': str(file_size),
+    'file': ('test.html', open(file_path, 'rb'), 'application/octet-stream')
+})
+headers['Content-Type'] = form.content_type
+```

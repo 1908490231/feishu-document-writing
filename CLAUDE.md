@@ -31,18 +31,19 @@ Feishu-document-writing/
 | 文件 | 类名 | 职责 |
 |------|------|------|
 | `auth.py` | `FeishuAuth` | 管理飞书 API 认证，获取 tenant_access_token，支持 token 过期自动刷新和线程安全 |
-| `uploader.py` | `FeishuImageUploader` | 上传本地/网络图片到飞书，返回 file_token |
+| `uploader.py` | `FeishuImageUploader` | 上传本地/网络图片、上传文件附件到飞书，返回 file_token |
 | `parser.py` | `MarkdownParser` | 解析 MD 为飞书 Block 格式，处理内联样式 |
-| `doc_writer.py` | `FeishuDocWriter` | 创建/更新文档，管理 Block 内容，写入知识库 |
+| `doc_writer.py` | `FeishuDocWriter` | 创建/更新文档，管理 Block 内容，写入知识库，文件附件块操作 |
 | `writer.py` | `FeishuWriter` | 主入口类，整合所有功能 |
 | `feishu_writer.py` | - | 命令行入口 |
 
 ## 飞书 API 端点
 
 - 认证：`POST /auth/v3/tenant_access_token/internal`
-- 上传图片：`POST /drive/v1/medias/upload_all`
+- 上传图片/文件：`POST /drive/v1/medias/upload_all`
 - 创建文档：`POST /docx/v1/documents`
 - 写入内容：`POST /docx/v1/documents/{doc_id}/blocks/{block_id}/children`
+- 更新块内容：`PATCH /docx/v1/documents/{doc_id}/blocks/{block_id}`
 - 在知识库创建文档：`POST /wiki/v2/spaces/{space_id}/nodes`
 - 获取知识库节点信息：`GET /wiki/v2/spaces/get_node?token={node_token}`
 
@@ -57,9 +58,11 @@ Feishu-document-writing/
 | 14 | code（代码块） |
 | 15 | quote（引用） |
 | 22 | divider（分割线） |
+| 23 | file（文件附件，内层块） |
 | 27 | image（图片） |
 | 31 | table（表格） |
 | 32 | table_cell（表格单元格，自动生成） |
+| 33 | view（文件附件外层容器，自动生成） |
 
 ## 开发注意事项
 
@@ -79,6 +82,8 @@ Feishu-document-writing/
 14. **批处理中单文件异常不会中断**，每个文件独立 try/except 保护
 15. **默认 space 模式文档不可见**，文档创建在应用自身云空间，飞书客户端无法浏览，只能通过链接访问；推荐使用 wiki 或 folder 模式
 16. **创建成功后输出文档链接**，wiki 模式输出 `/wiki/{node_token}`，其他模式输出 `/docx/{document_id}`
+17. **文件附件上传是三步操作**：① 创建空文件块（`file: {}`，不能有 name/token 字段）→ 取内层 block_id；② 上传文件，`parent_node = 内层 block_id`，必须用 `MultipartEncoder`；③ PATCH 内层块 `replace_file: {token: file_token}`（详见 `references/troubleshooting.md`）
+18. **文件附件块的结构**：block_type 23（文件内容）被自动包裹在 block_type 33（View 容器）中，创建时只需传 23，API 返回的是 33，内层 23 的 block_id 在 `children[0].children[0]` 中
 
 ## 知识库权限配置
 

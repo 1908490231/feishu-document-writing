@@ -1,17 +1,35 @@
 ---
 name: feishu-write
-description: 当用户需要将本地 Markdown 文件发布到飞书文档时使用。用户说"发布到飞书"、"写入飞书文档"、"上传到知识库"、"上传到文件夹"时触发。根据用户提供的参数自动选择目标位置。
+description: 当用户需要将本地 Markdown 文件发布到飞书文档时使用。用户说"发布到飞书"、"写入飞书文档"、"上传到知识库"、"上传到文件夹"、"上传附件到飞书"时触发。根据用户提供的参数自动选择目标位置。
 ---
 
 # 飞书文档写入
 
-将本地 Markdown 文件一键发布到飞书文档。**请严格按照以下步骤执行，不要检查环境、不要检查配置、不要安装依赖，直接执行命令。**
+将本地 Markdown 文件一键发布到飞书文档，支持同步上传文件附件（HTML、PDF 等）到文档最前面。**请严格按照以下步骤执行，不要检查环境、不要检查配置、不要安装依赖，直接执行命令。**
 
 ## 第一步：确定文件路径和目标位置
 
 从用户消息中提取：
-1. **文件路径**：用户要上传的 `.md` 文件或目录的绝对路径
-2. **目标位置**：按以下优先级判断（脚本内置了自动路由，大多数情况下不需要指定 `--target`）
+1. **文件路径**：用户要上传的文件路径
+2. **判断上传方式**（见下方规则）
+3. **目标位置**：按以下优先级判断（脚本内置了自动路由，大多数情况下不需要指定 `--target`）
+
+### 上传方式判断规则
+
+**默认规则（无需用户说明时使用）**：
+
+| 文件类型 | 默认处理方式 | 原因 |
+|---|---|---|
+| `.md` 文件 | 解析内容写入飞书文档（不加 `--attachment`） | 只有 MD 有内容解析器 |
+| **其他所有文件类型** | 上传为文件附件（加 `--attachment`） | TXT、HTML、PDF、DOCX、ZIP 等均无法解析为飞书块 |
+
+**用户明确指定时，以用户指定为准**：
+
+| 用户指定 | 执行方式 |
+|---|---|
+| "把这个 md 作为附件上传" | MD 文件走 `--attachment` |
+| "把这个 txt 的内容写入飞书" | 提示用户：工具只支持 MD 格式的内容解析，如需写入 TXT 内容请先转为 MD 文件 |
+| 同时提到 md 文件 + 其他文件 | MD 走主流程，其他文件走 `--attachment` |
 
 **路由优先级**（从高到低）：
 1. 用户提供了 `folder_token` → 上传到指定文件夹
@@ -25,6 +43,11 @@ description: 当用户需要将本地 Markdown 文件发布到飞书文档时使
 ### 最简命令（自动路由到 .env 中配置的默认位置）
 ```bash
 python -m scripts.feishu_writer "<文件绝对路径>"
+```
+
+### 同时上传附件到文档最前面
+```bash
+python -m scripts.feishu_writer "<md文件路径>" --attachment "<附件文件路径>"
 ```
 
 ### 用户指定了 folder_token
@@ -48,6 +71,7 @@ python -m scripts.feishu_writer "<目录绝对路径>"
 - **文档名称**
 - **文档链接**（输出中的 `链接:` 行）
 - **图片上传情况**
+- **附件上传情况**（输出中的 `[附件]` 行，告知附件已插入文档最前面）
 - **重复文件信息**（如果输出中包含"重复文件"相关信息，告知用户哪些文件已存在同名文档并已自动新建）
 
 ## 支持的格式
@@ -61,6 +85,7 @@ python -m scripts.feishu_writer "<目录绝对路径>"
 ✓ 表格
 ✓ 链接
 ✓ 分割线
+✓ 文件附件（HTML、PDF 等，插入到文档最前面）
 
 ## 仅在报错时参考以下内容
 
@@ -68,17 +93,19 @@ python -m scripts.feishu_writer "<目录绝对路径>"
 
 | 错误信息 | 原因 | 解决方式 |
 |---|---|---|
-| `ModuleNotFoundError` | 依赖未安装 | 执行 `pip install requests python-dotenv markdown` 后重试 |
+| `ModuleNotFoundError` | 依赖未安装 | 执行 `pip install requests python-dotenv markdown requests-toolbelt` 后重试 |
 | `获取 token 失败` / `FEISHU_APP_ID` | .env 配置缺失 | 提示用户参考 `references/setup-guide.md` 配置 .env |
 | `permission denied` | 应用权限不足 | 提示用户参考 `references/setup-guide.md` 添加协作者权限 |
 | `路径不存在` | 文件路径错误 | 确认文件路径后重试 |
 | 图片上传失败 | 图片路径或格式问题 | 参考 `references/troubleshooting.md` |
+| 附件显示失败 | 文件附件上传流程问题 | 参考 `references/troubleshooting.md` 文件附件章节 |
 
 ## 参数速查
 
 | 参数 | 说明 | 示例 |
 |---|---|---|
 | `path` | 文件或目录路径 | `./doc.md`、`./docs/` |
+| `--attachment` | 附件文件路径，上传并插入到文档最前面 | `--attachment ./template.html` |
 | `--target` | 目标：space、folder、wiki（通常不需要手动指定） | `--target wiki` |
 | `--folder-token` | 文件夹 token（指定后自动设为 folder 模式） | `--folder-token LlqxfXXXXXX` |
 | `--wiki-token` | 知识库 node_token（指定后自动设为 wiki 模式） | `--wiki-token FWn9wXXXXXX` |
@@ -101,4 +128,4 @@ python -m scripts.feishu_writer "<目录绝对路径>"
 |---|---|
 | `references/setup-guide.md` | 飞书应用创建、权限开通、.env 配置、协作者添加的完整指南 |
 | `references/token-guide.md` | folder_token、node_token、space_id 等各类 token 的用途和获取方法 |
-| `references/troubleshooting.md` | 按错误类型分类的常见问题排查，包括认证、权限、图片、文档找不到等问题 |
+| `references/troubleshooting.md` | 按错误类型分类的常见问题排查，包括认证、权限、图片、文件附件等问题 |
