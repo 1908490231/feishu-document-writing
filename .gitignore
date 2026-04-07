@@ -56,4 +56,5 @@ data/*
 提交pr的意见.md
 运行示例.md
 知识卡片等待传入/
+.claude/
 .claude/worktrees/
