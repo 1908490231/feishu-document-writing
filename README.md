@@ -1,14 +1,19 @@
 # 飞书文档写入工具
 
-一站式飞书内容发布工具。支持将 Markdown 内容解析为飞书文档块（含标题、代码块、表格、图片自动上传等），也支持将任意格式文件（HTML、PDF、TXT 等）作为附件插入文档。可写入知识库、云文件夹或个人空间，单文件或批量均可。
+一站式飞书内容发布工具。支持将 Markdown、TXT、CSV、XLSX、DOCX 内容解析为飞书文档块（含标题、表格、代码块、图片自动上传等），也支持将任意格式文件作为附件插入文档。可写入知识库、云文件夹或个人空间，单文件或批量均可。
 
 ## 功能特性
 
 - 支持写入到我的空间、指定文件夹、知识库
+- **支持多种文件格式直接写入为可编辑飞书文档**
+  - `.md` — Markdown 全格式解析（标题、代码块、表格、图片等）
+  - `.txt` — 纯文本按段落写入
+  - `.csv` — 自动解析为飞书表格
+  - `.xlsx` — 多 Sheet 逐一转为表格（需安装 `openpyxl`）
+  - `.docx` — 提取标题/段落/表格写入（需安装 `python-docx`）
 - 自动上传本地图片和网络图片
 - **支持上传文件附件（HTML、PDF 等），自动插入到文档最前面**
 - 保留代码块语法高亮
-- 支持表格解析与写入
 - 支持单个文件或批量处理
 - 重复文档检测与处理
 - 支持配置默认知识库，简化命令
@@ -22,6 +27,9 @@
 
 ```bash
 pip install -r requirements.txt
+
+# 可选：支持 xlsx/docx 文件写入（非 MD 格式）
+pip install openpyxl python-docx
 ```
 
 ### 2. 配置凭证
@@ -78,14 +86,19 @@ FEISHU_DEFAULT_WIKI_NODE_TOKEN=你的知识库node_token
 ### 5. 使用
 
 ```bash
-# 写入到我的空间（仅可通过链接访问，见下方说明）
-python -m scripts.feishu_writer ./doc.md
+# 写入 MD 到知识库（推荐，使用 .env 中配置的默认知识库）
+python -m scripts.feishu_writer ./doc.md --target wiki
 
-# 写入到指定文件夹（推荐）
+# 直接写入 TXT / CSV / XLSX / DOCX 到知识库（自动解析为可编辑文档）
+python -m scripts.feishu_writer ./data.csv
+python -m scripts.feishu_writer ./report.xlsx
+python -m scripts.feishu_writer ./document.docx
+
+# 写入到指定文件夹
 python -m scripts.feishu_writer ./doc.md --target folder --folder-token LlqxfXXXXXX
 
-# 写入到知识库（推荐，使用 .env 中配置的默认知识库）
-python -m scripts.feishu_writer ./doc.md --target wiki
+# 写入到我的空间（仅可通过链接访问，见下方说明）
+python -m scripts.feishu_writer ./doc.md
 
 # 写入到指定知识库
 python -m scripts.feishu_writer ./doc.md --target wiki --wiki-token FWn9wEcZhixVLrk2z5scBx8DnTe
@@ -93,8 +106,11 @@ python -m scripts.feishu_writer ./doc.md --target wiki --wiki-token FWn9wEcZhixV
 # 同时上传附件文件到文档最前面
 python -m scripts.feishu_writer ./doc.md --target wiki --attachment ./template.html
 
-# 批量处理目录
+# 批量处理目录（自动收集 md/txt/csv/xlsx/docx）
 python -m scripts.feishu_writer ./docs/ --target folder --folder-token LlqxfXXXXXX
+
+# 强制使用 import_tasks 导入（文件放入 folder，非 block 写入）
+python -m scripts.feishu_writer ./data.xlsx --import --folder-token LlqxfXXXXXX
 ```
 
 > **注意**：成功创建文档后，程序会输出文档链接，可直接点击访问。
@@ -103,9 +119,10 @@ python -m scripts.feishu_writer ./docs/ --target folder --folder-token LlqxfXXXX
 
 | 参数 | 简写 | 说明 | 默认值 |
 |------|------|------|--------|
-| `path` | - | MD 文件或目录路径 | 必填 |
+| `path` | - | 文件或目录路径（md/txt/csv/xlsx/docx） | 必填 |
 | `--target` | `-t` | 目标位置 (space/folder/wiki) | space |
 | `--attachment` | `-a` | 附件文件路径，上传并插入到文档最前面 | - |
+| `--import` | `-i` | 强制使用 import_tasks 导入（仅支持 folder 目标） | false |
 | `--folder-token` | `-f` | 文件夹 token | - |
 | `--wiki-token` | `-w` | 知识库 node_token（可在 .env 中配置默认值） | - |
 | `--on-duplicate` | - | 重复处理 (ask/update/skip/new) | ask |
@@ -141,7 +158,9 @@ Space ID 是知识库的内部标识（数字），可通过以下方式获取�
 - 程序会自动通过 node_token 查询 space_id
 - 也可手动配置在 `.env` 的 `FEISHU_DEFAULT_WIKI_SPACE_ID` 中
 
-## 支持的 Markdown 格式
+## 支持的文件格式
+
+### Markdown（.md）
 
 | 格式 | 示例 | 支持 |
 |------|------|------|
@@ -156,7 +175,16 @@ Space ID 是知识库的内部标识（数字），可通过以下方式获取�
 | 链接 | `[text](url)` | ✓ |
 | 图片 | `![alt](path)` | ✓ |
 | 分割线 | `---` | ✓ |
-| 表格 | `| A | B |` | ✓ |
+| 表格 | `\| A \| B \|` | ✓ |
+
+### 其他格式
+
+| 格式 | 写入结果 | 额外依赖 |
+|------|---------|---------|
+| `.txt` | 段落文本，识别 `#`/`##` 标题 | 无 |
+| `.csv` | 飞书表格（含表头） | 无 |
+| `.xlsx` | 每个 Sheet 生成独立表格 | `openpyxl` |
+| `.docx` | 保留标题层级/段落/表格 | `python-docx` |
 
 ## 文件附件上传
 
@@ -168,11 +196,13 @@ python -m scripts.feishu_writer ./article.md --target wiki --attachment ./templa
 
 附件会以可下载的文件块形式出现在文档顶部，用户点击即可下载原始文件。
 
-**默认行为**：
-- `.md` 文件 → 解析内容写入飞书文档（主流程）
-- 其他所有文件类型（TXT、HTML、PDF、DOCX、ZIP 等）→ 上传为附件
+**路由逻辑**：
 
-**附件支持格式**：HTML、PDF、Word、Excel、PPT、TXT、ZIP 等常见格式均可上传，飞书会按文件类型显示对应图标。
+| 文件格式 | 默认行为 | 加 `--import` 时 |
+|---------|---------|----------------|
+| `.md` | 解析内容写入飞书文档 | 无效（仍走解析写入） |
+| `.txt` `.csv` `.xlsx` `.docx` | 解析内容写入飞书文档（可写入 wiki） | 使用 import_tasks 导入（仅支持 folder） |
+| 其他格式（pdf、zip 等） | 提示使用 `--attachment` | - |
 
 ## 作为 Claude Code 技能使用
 

@@ -1,11 +1,11 @@
 ---
 name: feishu-write
-description: 当用户需要将本地 Markdown 文件发布到飞书文档时使用。用户说"发布到飞书"、"写入飞书文档"、"上传到知识库"、"上传到文件夹"、"上传附件到飞书"时触发。根据用户提供的参数自动选择目标位置。
+description: 当用户需要将本地文件发布到飞书文档时使用。用户说"发布到飞书"、"写入飞书文档"、"上传到知识库"、"上传到文件夹"、"上传附件到飞书"、"把这个文件传到飞书"时触发。支持 MD、TXT、CSV、XLSX、DOCX 内容写入，以及任意文件作为附件上传。
 ---
 
 # 飞书文档写入
 
-将本地 Markdown 文件一键发布到飞书文档，支持同步上传文件附件（HTML、PDF 等）到文档最前面。**请严格按照以下步骤执行，不要检查环境、不要检查配置、不要安装依赖，直接执行命令。**
+将本地文件一键发布到飞书文档，支持 MD/TXT/CSV/XLSX/DOCX 内容解析写入，以及同步上传文件附件到文档最前面。**请严格按照以下步骤执行，不要检查环境、不要检查配置、不要安装依赖，直接执行命令。**
 
 ## 第一步：确定文件路径和目标位置
 
@@ -18,18 +18,22 @@ description: 当用户需要将本地 Markdown 文件发布到飞书文档时使
 
 **默认规则（无需用户说明时使用）**：
 
-| 文件类型 | 默认处理方式 | 原因 |
-|---|---|---|
-| `.md` 文件 | 解析内容写入飞书文档（不加 `--attachment`） | 只有 MD 有内容解析器 |
-| **其他所有文件类型** | 上传为文件附件（加 `--attachment`） | TXT、HTML、PDF、DOCX、ZIP 等均无法解析为飞书块 |
+| 文件类型 | 默认处理方式 |
+|---|---|
+| `.md` | 解析内容写入飞书文档（标题、代码块、表格、图片等） |
+| `.txt` | 解析内容写入飞书文档（按段落写入，识别 `#`/`##` 标题） |
+| `.csv` | 解析内容写入飞书文档（整体转为飞书表格） |
+| `.xlsx` | 解析内容写入飞书文档（每个 Sheet 生成独立表格） |
+| `.docx` | 解析内容写入飞书文档（保留标题层级/段落/表格） |
+| **其他文件**（PDF、ZIP、图片、HTML 等） | 提示使用 `--attachment` 上传为文件附件 |
 
 **用户明确指定时，以用户指定为准**：
 
 | 用户指定 | 执行方式 |
 |---|---|
-| "把这个 md 作为附件上传" | MD 文件走 `--attachment` |
-| "把这个 txt 的内容写入飞书" | 提示用户：工具只支持 MD 格式的内容解析，如需写入 TXT 内容请先转为 MD 文件 |
-| 同时提到 md 文件 + 其他文件 | MD 走主流程，其他文件走 `--attachment` |
+| "把这个文件作为附件上传" | 走 `--attachment` |
+| "用 import 方式导入" | 加 `--import` 参数（文件放入 folder，不可写入 wiki） |
+| 同时提到 md 文件 + 其他文件 | 各走各自的默认流程 |
 
 **路由优先级**（从高到低）：
 1. 用户提供了 `folder_token` → 上传到指定文件夹
@@ -42,6 +46,7 @@ description: 当用户需要将本地 Markdown 文件发布到飞书文档时使
 
 ### 最简命令（自动路由到 .env 中配置的默认位置）
 ```bash
+# MD / TXT / CSV / XLSX / DOCX 均可直接传入，自动解析内容写入飞书文档
 python -m scripts.feishu_writer "<文件绝对路径>"
 ```
 
@@ -60,9 +65,15 @@ python -m scripts.feishu_writer "<文件绝对路径>" --folder-token <folder_to
 python -m scripts.feishu_writer "<文件绝对路径>" --wiki-token <node_token>
 ```
 
-### 批量上传目录
+### 批量上传目录（自动收集 md/txt/csv/xlsx/docx）
 ```bash
 python -m scripts.feishu_writer "<目录绝对路径>"
+```
+
+### 使用 import_tasks 导入到 folder（非内容解析方式）
+```bash
+# 注意：--import 只能配合 folder_token 使用，不支持 wiki
+python -m scripts.feishu_writer "<文件绝对路径>" --import --folder-token <folder_token>
 ```
 
 ## 第三步：报告结果
@@ -76,16 +87,17 @@ python -m scripts.feishu_writer "<目录绝对路径>"
 
 ## 支持的格式
 
-✓ 标题 (h1-h9)
-✓ 段落文本（加粗、斜体、行内代码）
-✓ 代码块（含语法高亮）
-✓ 无序/有序列表
-✓ 引用块
-✓ 图片（自动上传本地和网络图片）
-✓ 表格
-✓ 链接
-✓ 分割线
-✓ 文件附件（HTML、PDF 等，插入到文档最前面）
+**内容写入格式（解析为可编辑飞书文档）**：
+
+| 格式 | 支持内容 |
+|---|---|
+| `.md` | 标题(h1-h9)、段落（加粗/斜体/行内代码）、代码块、无序/有序列表、引用、图片（自动上传）、表格、链接、分割线 |
+| `.txt` | 段落文本，识别 `#` / `##` 标题 |
+| `.csv` | 整体转为飞书表格（含表头） |
+| `.xlsx` | 每个 Sheet 生成独立二级标题 + 表格 |
+| `.docx` | 标题层级、段落、表格 |
+
+**附件上传**：PDF、HTML、ZIP、图片等其他格式，使用 `--attachment` 参数上传为可下载文件块。
 
 ## 仅在报错时参考以下内容
 
@@ -104,8 +116,9 @@ python -m scripts.feishu_writer "<目录绝对路径>"
 
 | 参数 | 说明 | 示例 |
 |---|---|---|
-| `path` | 文件或目录路径 | `./doc.md`、`./docs/` |
+| `path` | 文件或目录路径（md/txt/csv/xlsx/docx） | `./doc.md`、`./data.csv`、`./docs/` |
 | `--attachment` | 附件文件路径，上传并插入到文档最前面 | `--attachment ./template.html` |
+| `--import` / `-i` | 强制用 import_tasks 导入（仅支持 folder，不支持 wiki） | `--import` |
 | `--target` | 目标：space、folder、wiki（通常不需要手动指定） | `--target wiki` |
 | `--folder-token` | 文件夹 token（指定后自动设为 folder 模式） | `--folder-token LlqxfXXXXXX` |
 | `--wiki-token` | 知识库 node_token（指定后自动设为 wiki 模式） | `--wiki-token FWn9wXXXXXX` |

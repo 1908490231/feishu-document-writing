@@ -50,6 +50,7 @@ def main():
     arg_parser.add_argument("--wiki-token", "-w", help="知识库 token")
     arg_parser.add_argument("--no-check-duplicate", action="store_true", help="不检查重复文档")
     arg_parser.add_argument("--attachment", "-a", help="上传附件文件到文档最前面（本地文件路径）")
+    arg_parser.add_argument("--import", "-i", dest="do_import", action="store_true", help="将文件通过 import_tasks API 导入为飞书云文档（支持 txt/csv/xlsx/docx）")
     arg_parser.add_argument(
         "--on-duplicate",
         choices=["ask", "update", "skip", "new"],
@@ -87,18 +88,25 @@ def main():
         print(f"错误: {e}")
         sys.exit(1)
 
+    # 支持 import_tasks 的文件格式
+    IMPORT_EXTENSIONS = {".txt", ".csv", ".xlsx", ".docx"}
+
     # 获取文件列表
     path = Path(args.path)
     if path.is_file():
         files = [path]
     elif path.is_dir():
+        # 目录模式：收集 md 文件和支持导入的非 md 文件
         files = list(path.glob("**/*.md"))
+        for ext in IMPORT_EXTENSIONS:
+            files.extend(path.glob(f"**/*{ext}"))
+        files = sorted(set(files))
     else:
         print(f"错误: 路径不存在 - {args.path}")
         sys.exit(1)
 
     if not files:
-        print("未找到 MD 文件")
+        print("未找到可处理的文件")
         sys.exit(0)
 
     # 处理文件
@@ -109,6 +117,30 @@ def main():
 
     for i, file in enumerate(files, 1):
         print(f"正在处理 ({i}/{len(files)}): {file.name}")
+
+        file_ext = file.suffix.lower()
+
+        # --import 显式强制走 import_tasks（仅 folder 目标可用）
+        if args.do_import:
+            effective_folder = args.folder_token or os.getenv("FEISHU_DEFAULT_FOLDER_TOKEN")
+            try:
+                result = writer.import_file(str(file), folder_token=effective_folder)
+                if result.get("success"):
+                    success_count += 1
+                    print(f"  [OK] {result.get('message')}")
+                    print(f"  链接: {result.get('url')}")
+                else:
+                    fail_count += 1
+                    print(f"  [FAIL] {result.get('message')}")
+            except Exception as e:
+                fail_count += 1
+                print(f"  [ERROR] 处理文件 {file.name} 时发生异常: {e}")
+            continue
+
+        # 不支持的格式
+        if file_ext not in {".md"} | IMPORT_EXTENSIONS:
+            print(f"  [跳过] 不支持的文件格式 {file_ext}，如需上传为附件请使用 --attachment")
+            continue
 
         try:
             result = writer.write_file(

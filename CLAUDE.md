@@ -31,9 +31,10 @@ Feishu-document-writing/
 | 文件 | 类名 | 职责 |
 |------|------|------|
 | `auth.py` | `FeishuAuth` | 管理飞书 API 认证，获取 tenant_access_token，支持 token 过期自动刷新和线程安全 |
-| `uploader.py` | `FeishuImageUploader` | 上传本地/网络图片、上传文件附件到飞书，返回 file_token |
+| `uploader.py` | `FeishuImageUploader` | 上传本地/网络图片、文件附件、import_tasks 专用上传，返回 file_token |
 | `parser.py` | `MarkdownParser` | 解析 MD 为飞书 Block 格式，处理内联样式 |
-| `doc_writer.py` | `FeishuDocWriter` | 创建/更新文档，管理 Block 内容，写入知识库，文件附件块操作 |
+| `file_parser.py` | `FileParser` | 解析 txt/csv/xlsx/docx 为飞书 Block 格式，接口与 MarkdownParser 兼容 |
+| `doc_writer.py` | `FeishuDocWriter` | 创建/更新文档，管理 Block 内容，写入知识库，文件附件块操作，import_tasks 导入 |
 | `writer.py` | `FeishuWriter` | 主入口类，整合所有功能 |
 | `feishu_writer.py` | - | 命令行入口 |
 
@@ -46,6 +47,8 @@ Feishu-document-writing/
 - 更新块内容：`PATCH /docx/v1/documents/{doc_id}/blocks/{block_id}`
 - 在知识库创建文档：`POST /wiki/v2/spaces/{space_id}/nodes`
 - 获取知识库节点信息：`GET /wiki/v2/spaces/get_node?token={node_token}`
+- 创建导入任务：`POST /drive/v1/import_tasks`
+- 查询导入任务：`GET /drive/v1/import_tasks/{ticket}`
 
 ## 飞书 Block 类型映射
 
@@ -84,6 +87,9 @@ Feishu-document-writing/
 16. **创建成功后输出文档链接**，wiki 模式输出 `/wiki/{node_token}`，其他模式输出 `/docx/{document_id}`
 17. **文件附件上传是三步操作**：① 创建空文件块（`file: {}`，不能有 name/token 字段）→ 取内层 block_id；② 上传文件，`parent_node = 内层 block_id`，必须用 `MultipartEncoder`；③ PATCH 内层块 `replace_file: {token: file_token}`（详见 `references/troubleshooting.md`）
 18. **文件附件块的结构**：block_type 23（文件内容）被自动包裹在 block_type 33（View 容器）中，创建时只需传 23，API 返回的是 33，内层 23 的 block_id 在 `children[0].children[0]` 中
+19. **非 MD 文件解析**：txt/csv/xlsx/docx 由 `FileParser`（`file_parser.py`）解析为飞书 blocks，与 `MarkdownParser` 接口一致（`blocks`、`pending_images`、`pending_tables`），直接复用 `_write_content_with_images` 写入
+20. **import_tasks 仅支持 folder**：`/drive/v1/import_tasks` 的 `mount_type` 只有 1（folder）和 2（space），不支持 wiki；需要写入 wiki 时必须用 block 方式解析写入
+21. **import_tasks 三步流程**：① `upload_for_import()`（`parent_type="ccm_import_open"`，`extra={"obj_type":..., "file_extension":...}`）→ file_token；② `create_import_task()` → ticket；③ `poll_import_task()` 轮询 `job_status`（0=成功，1/2=处理中）
 
 ## 知识库权限配置
 
@@ -111,7 +117,19 @@ FEISHU_DEFAULT_WIKI_SPACE_ID=默认知识库space_id（可选）
 FEISHU_DEFAULT_WIKI_NODE_TOKEN=默认知识库node_token（可选）
 ```
 
-## 测试方法
+## 关键文件路径速查
+
+| 功能 | 路径 |
+|------|------|
+| 命令行入口 | `scripts/feishu_writer.py` |
+| 主入口类 | `scripts/writer.py` |
+| MD 解析器 | `scripts/parser.py` |
+| 非 MD 文件解析器 | `scripts/file_parser.py`（新增，解析 txt/csv/xlsx/docx） |
+| 图片/文件上传 | `scripts/uploader.py` |
+| 文档写入 / 导入任务 | `scripts/doc_writer.py` |
+| 认证模块 | `scripts/auth.py` |
+| 测试文件 | `data/test-import.{txt,csv,xlsx,docx}` |
+| 生成测试文件脚本 | `data/create_test_files.py` |
 
 ```bash
 # 安装依赖

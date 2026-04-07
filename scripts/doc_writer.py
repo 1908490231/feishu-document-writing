@@ -26,6 +26,104 @@ class FeishuDocWriter:
             "Content-Type": "application/json"
         }
 
+    def create_import_task(
+        self,
+        file_token: str,
+        file_extension: str,
+        obj_type: str,
+        folder_token: Optional[str] = None
+    ) -> str:
+        """
+        创建飞书导入任务
+
+        Args:
+            file_token: 上传文件后获得的 file_token
+            file_extension: 文件扩展名（不含点，如 "txt"、"csv"）
+            obj_type: 目标类型（"docx" 或 "sheet"）
+            folder_token: 目标文件夹 token，为空时读取环境变量 FEISHU_DEFAULT_FOLDER_TOKEN
+
+        Returns:
+            ticket（任务ID）
+
+        Raises:
+            Exception: 创建失败时抛出
+        """
+        import os
+        if not folder_token:
+            folder_token = os.getenv("FEISHU_DEFAULT_FOLDER_TOKEN")
+        if not folder_token:
+            raise Exception("创建导入任务需要 folder_token，请通过参数传入或配置 FEISHU_DEFAULT_FOLDER_TOKEN 环境变量")
+
+        url = f"{self.BASE_URL}/drive/v1/import_tasks"
+        data = {
+            "file_extension": file_extension,
+            "file_token": file_token,
+            "type": obj_type,
+            "point": {
+                "mount_type": 1,
+                "mount_key": folder_token
+            }
+        }
+
+        resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        result = resp.json()
+
+        if result.get("code") != 0:
+            raise Exception(f"创建导入任务失败: {result.get('msg')} (code={result.get('code')})")
+
+        ticket = result.get("data", {}).get("ticket")
+        if not ticket:
+            raise Exception("创建导入任务成功但未返回 ticket")
+        return ticket
+
+    def poll_import_task(self, ticket: str, max_retries: int = 15, interval: int = 2) -> dict:
+        """
+        轮询导入任务状态，等待完成
+
+        Args:
+            ticket: 导入任务 ticket
+            max_retries: 最大轮询次数（默认 15 次）
+            interval: 每次轮询间隔秒数（默认 2 秒）
+
+        Returns:
+            {"url": str, "token": str, "type": str}
+
+        Raises:
+            Exception: 任务失败或超时时抛出
+        """
+        url = f"{self.BASE_URL}/drive/v1/import_tasks/{ticket}"
+
+        for attempt in range(1, max_retries + 1):
+            resp = requests.get(url, headers=self._headers(), timeout=self.REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            result = resp.json()
+
+            if result.get("code") != 0:
+                raise Exception(f"查询导入任务失败: {result.get('msg')} (code={result.get('code')})")
+
+            task = result.get("data", {}).get("result", {})
+            job_status = task.get("job_status")
+
+            # 0=成功，1/2=处理中，其他=失败
+            if job_status == 0:
+                token = task.get("token")
+                doc_type = task.get("type")
+                # 根据类型构造文档 URL
+                if doc_type == "sheet":
+                    doc_url = f"https://my.feishu.cn/sheets/{token}"
+                else:
+                    doc_url = f"https://my.feishu.cn/docx/{token}"
+                return {"url": doc_url, "token": token, "type": doc_type}
+            elif job_status in (1, 2):
+                print(f"  导入中... ({attempt}/{max_retries})")
+                time.sleep(interval)
+            else:
+                job_error_msg = task.get("job_error_msg", "")
+                raise Exception(f"导入任务失败: status={job_status}, error={job_error_msg}")
+
+        raise Exception(f"导入任务超时（已等待 {max_retries * interval} 秒）")
+
     def create_document(self, title: str, folder_token: Optional[str] = None) -> Tuple[str, str]:
         """
         创建文档

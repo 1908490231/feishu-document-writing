@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from .auth import FeishuAuth
 from .uploader import FeishuImageUploader
 from .parser import MarkdownParser
+from .file_parser import FileParser
 from .doc_writer import FeishuDocWriter
 
 
@@ -57,16 +58,23 @@ class FeishuWriter:
         if not path.exists():
             return {"success": False, "document_id": None, "message": f"文件不存在: {md_path}"}
 
-        # 读取 MD 文件
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
+        # 非 MD 文件用 FileParser 解析
+        ext = path.suffix.lower()
+        if ext != ".md":
+            parser = FileParser(str(path))
+            try:
+                blocks = parser.parse()
+            except Exception as e:
+                return {"success": False, "document_id": None, "message": f"文件解析失败: {e}"}
+        else:
+            # 读取 MD 文件
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            parser = MarkdownParser(str(path))
+            blocks = parser.parse(content)
 
-        # 用文件名作为标题（去掉 .md 扩展名）
+        # 用文件名作为标题（去掉扩展名）
         title = path.stem
-
-        # 解析 MD 内容（不再传入 uploader）
-        parser = MarkdownParser(str(path))
-        blocks = parser.parse(content)
 
         # folder_token 回退到环境变量
         if target == "folder" and not folder_token:
@@ -271,6 +279,78 @@ class FeishuWriter:
             return {"success": False, "message": f"绑定文件块失败: {path.name}"}
 
         return {"success": True, "message": f"文件附件已插入文档最前面: {path.name}"}
+
+    def import_file(self, file_path: str, folder_token: Optional[str] = None) -> Dict[str, Any]:
+        """
+        将文件通过 import_tasks API 导入为飞书云文档
+
+        支持格式：.txt / .docx → 飞书文档，.csv / .xlsx → 电子表格
+        注意：import_tasks 仅支持 folder/space 目标，不支持直接写入 wiki
+
+        Args:
+            file_path: 本地文件路径
+            folder_token: 目标文件夹 token（优先级：参数 > 环境变量 FEISHU_DEFAULT_FOLDER_TOKEN）
+
+        Returns:
+            {"success": bool, "url": str, "token": str, "message": str}
+        """
+        # 文件类型映射
+        EXT_TO_OBJ_TYPE = {
+            "txt": "docx",
+            "docx": "docx",
+            "csv": "sheet",
+            "xlsx": "sheet",
+        }
+
+        path = Path(file_path)
+        if not path.exists():
+            return {"success": False, "url": None, "token": None, "message": f"文件不存在: {file_path}"}
+
+        ext = path.suffix.lstrip(".").lower()
+        obj_type = EXT_TO_OBJ_TYPE.get(ext)
+        if not obj_type:
+            return {
+                "success": False,
+                "url": None,
+                "token": None,
+                "message": f"不支持的文件格式: .{ext}（支持：txt、docx、csv、xlsx）"
+            }
+
+        # folder_token 回退到环境变量
+        if not folder_token:
+            folder_token = os.getenv("FEISHU_DEFAULT_FOLDER_TOKEN")
+
+        # 初始化 uploader
+        if not self.uploader:
+            self.uploader = FeishuImageUploader(self.auth, path.parent)
+
+        print(f"  [导入] 上传文件: {path.name}")
+        # 步骤1：上传文件
+        file_token = self.uploader.upload_for_import(str(path), obj_type)
+        if not file_token:
+            return {"success": False, "url": None, "token": None, "message": f"文件上传失败: {path.name}"}
+
+        print(f"  [导入] 创建导入任务...")
+        # 步骤2：创建导入任务
+        try:
+            ticket = self.doc_writer.create_import_task(file_token, ext, obj_type, folder_token)
+        except Exception as e:
+            return {"success": False, "url": None, "token": None, "message": str(e)}
+
+        print(f"  [导入] 等待导入完成 (ticket={ticket})...")
+        # 步骤3：轮询任务状态
+        try:
+            result = self.doc_writer.poll_import_task(ticket)
+        except Exception as e:
+            return {"success": False, "url": None, "token": None, "message": str(e)}
+
+        return {
+            "success": True,
+            "url": result["url"],
+            "token": result["token"],
+            "type": result["type"],
+            "message": f"导入成功: {path.name}"
+        }
 
     def update_document(self, document_id: str, md_path: str) -> Dict[str, Any]:
         """更新已有文档"""

@@ -4,6 +4,7 @@
 """
 
 import hashlib
+import json
 import mimetypes
 import os
 import tempfile
@@ -151,6 +152,52 @@ class FeishuImageUploader:
                 return result.get("data", {}).get("file_token")
         except Exception as e:
             print(f"警告: 文件上传异常 - {file_path}: {e}")
+            return None
+
+    def upload_for_import(self, file_path: str, obj_type: str) -> Optional[str]:
+        """
+        上传文件到飞书，用于 import_tasks 导入流程
+
+        Args:
+            file_path: 本地文件路径
+            obj_type: 目标文档类型（"docx" 或 "sheet"）
+
+        Returns:
+            file_token 或 None（失败时）
+        """
+        path = Path(file_path)
+        if not path.exists():
+            print(f"警告: 文件不存在 - {file_path}")
+            return None
+
+        ext = path.suffix.lstrip(".")
+        file_size = path.stat().st_size
+        extra = json.dumps({"obj_type": obj_type, "file_extension": ext})
+
+        try:
+            with open(path, "rb") as f:
+                form = MultipartEncoder({
+                    "file_name": path.name,
+                    "parent_type": "ccm_import_open",
+                    "size": str(file_size),
+                    "extra": extra,
+                    "file": (path.name, f, "application/octet-stream")
+                })
+                headers = {
+                    "Authorization": f"Bearer {self.auth.get_token()}",
+                    "Content-Type": form.content_type
+                }
+                resp = requests.post(self.UPLOAD_URL, headers=headers, data=form, timeout=30)
+                resp.raise_for_status()
+                result = resp.json()
+
+                if result.get("code") != 0:
+                    print(f"警告: 导入上传失败 - {file_path}: {result.get('msg')}")
+                    return None
+
+                return result.get("data", {}).get("file_token")
+        except Exception as e:
+            print(f"警告: 导入上传异常 - {file_path}: {e}")
             return None
 
     def upload(self, image_source: str, parent_node: str) -> Optional[str]:
