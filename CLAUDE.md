@@ -7,7 +7,7 @@
 ## 目录结构
 
 ```
-Feishu-document-writing/
+feishu-document-writing/
 ├── CLAUDE.md           # 项目说明（本文件）
 ├── README.md           # 用户使用文档
 ├── skill.md            # 技能定义文件

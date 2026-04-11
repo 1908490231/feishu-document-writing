@@ -1,5 +1,5 @@
 ---
-name: feishu-write
+name: feishu-document-writing
 description: 当用户需要将本地文件发布到飞书文档时使用。用户说"发布到飞书"、"写入飞书文档"、"上传到知识库"、"上传到文件夹"、"上传附件到飞书"、"把这个文件传到飞书"时触发。支持 MD、TXT、CSV、XLSX、DOCX 内容写入，以及任意文件作为附件上传。
 ---
 
