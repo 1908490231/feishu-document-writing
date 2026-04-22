@@ -167,17 +167,25 @@ class FeishuDocWriter:
 
         # 飞书 API 限制每次最多 50 个 block
         batch_size = 50
+        max_retries = 3
         for i in range(0, len(blocks), batch_size):
             batch = blocks[i:i + batch_size]
             data = {"children": batch}
 
-            resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            result = resp.json()
-
-            if result.get("code") != 0:
-                print(f"警告: 写入部分内容失败: {result.get('msg')}")
-                return False
+            for attempt in range(1, max_retries + 1):
+                resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
+                if resp.status_code in (400, 429, 500, 503) and attempt < max_retries:
+                    time.sleep(2 * attempt)
+                    continue
+                resp.raise_for_status()
+                result = resp.json()
+                if result.get("code") != 0:
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                        continue
+                    print(f"警告: 写入部分内容失败: {result.get('msg')}")
+                    return False
+                break
 
         return True
 
@@ -485,22 +493,34 @@ class FeishuDocWriter:
             ]
         }
 
-        try:
-            resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            result = resp.json()
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
+                if resp.status_code in (400, 429, 500, 503) and attempt < max_retries:
+                    time.sleep(2 * attempt)
+                    continue
+                resp.raise_for_status()
+                result = resp.json()
 
-            if result.get("code") != 0:
-                print(f"警告: 创建表格失败: {result.get('msg')}")
+                if result.get("code") != 0:
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                        continue
+                    print(f"警告: 创建表格失败: {result.get('msg')}")
+                    return None
+
+                children = result.get("data", {}).get("children", [])
+                if children:
+                    return children[0].get("block_id")
                 return None
-
-            children = result.get("data", {}).get("children", [])
-            if children:
-                return children[0].get("block_id")
-            return None
-        except Exception as e:
-            print(f"警告: 创建表格异常: {e}")
-            return None
+            except Exception as e:
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                    continue
+                print(f"警告: 创建表格异常: {e}")
+                return None
+        return None
 
     def get_table_cells(self, document_id: str, table_block_id: str) -> List[Dict[str, Any]]:
         """
@@ -575,20 +595,31 @@ class FeishuDocWriter:
             ]
         }
 
-        try:
-            resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            result = resp.json()
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
+                if resp.status_code in (400, 429, 500, 503) and attempt < max_retries:
+                    time.sleep(1.5 * attempt)
+                    continue
+                resp.raise_for_status()
+                result = resp.json()
 
-            if result.get("code") != 0:
-                # 输出详细错误信息用于调试
-                print(f"填充单元格失败: code={result.get('code')}, msg={result.get('msg')}")
+                if result.get("code") != 0:
+                    if attempt < max_retries:
+                        time.sleep(1.5 * attempt)
+                        continue
+                    print(f"填充单元格失败: code={result.get('code')}, msg={result.get('msg')}")
+                    return False
+
+                return True
+            except Exception as e:
+                if attempt < max_retries:
+                    time.sleep(1.5 * attempt)
+                    continue
+                print(f"填充单元格异常: {e}")
                 return False
-
-            return True
-        except Exception as e:
-            print(f"填充单元格异常: {e}")
-            return False
+        return False
 
     def fill_table(self, document_id: str, table_block_id: str, table_data: List[List[str]]) -> bool:
         """

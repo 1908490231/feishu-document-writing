@@ -109,12 +109,21 @@ class FeishuWriter:
             if not wiki_space_id:
                 return {"success": False, "document_id": None, "message": "未配置知识库 space_id，请在 .env 中配置或通过 --wiki-token 指定"}
 
-            try:
-                doc_id, node_token = self.doc_writer.create_wiki_document(
-                    title, wiki_space_id, wiki_node_token
-                )
-            except Exception as e:
-                return {"success": False, "document_id": None, "message": f"创建知识库文档失败: {e}"}
+            import time as _time
+            doc_id, node_token = None, None
+            for _attempt in range(1, 4):
+                try:
+                    doc_id, node_token = self.doc_writer.create_wiki_document(
+                        title, wiki_space_id, wiki_node_token
+                    )
+                    break
+                except Exception as e:
+                    if _attempt < 3:
+                        _time.sleep(2 * _attempt)
+                    else:
+                        return {"success": False, "document_id": None, "message": f"创建知识库文档失败: {e}"}
+            if not doc_id:
+                return {"success": False, "document_id": None, "message": "创建知识库文档失败: 未获取到文档ID"}
 
             # 写入内容（包含图片和表格处理）
             uploaded_images, write_success = self._write_content_with_images(str(path), doc_id, blocks, parser.pending_images, parser.pending_tables)
@@ -223,13 +232,16 @@ class FeishuWriter:
                 cols = max(len(row) for row in table_data) if table_data else 0
 
                 if rows > 0 and cols > 0:
-                    # 1. 创建表格
-                    table_block_id = self.doc_writer.create_table(doc_id, doc_id, rows, cols)
-                    if table_block_id:
-                        # 2. 填充表格内容
-                        self.doc_writer.fill_table(doc_id, table_block_id, table_data)
-                    else:
-                        print(f"警告: 创建表格失败")
+                    # 飞书 API 限制单张表格最多 9 行，超出时拆分写入
+                    MAX_TABLE_ROWS = 9
+                    chunks = [table_data[s:s + MAX_TABLE_ROWS] for s in range(0, rows, MAX_TABLE_ROWS)]
+                    for chunk in chunks:
+                        chunk_rows = len(chunk)
+                        table_block_id = self.doc_writer.create_table(doc_id, doc_id, chunk_rows, cols)
+                        if table_block_id:
+                            self.doc_writer.fill_table(doc_id, table_block_id, chunk)
+                        else:
+                            print(f"警告: 创建表格失败（{chunk_rows}行{cols}列）")
             else:
                 # 普通块，加入当前批次
                 current_batch.append(block)
