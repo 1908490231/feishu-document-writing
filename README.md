@@ -21,18 +21,15 @@
 - 所有 HTTP 请求 30 秒超时，避免无限阻塞
 - 批处理中单文件异常不会中断整体流程
 
-## 快速开始
-
-### 1. 安装依赖
+## 安装
 
 ```bash
-pip install -r requirements.txt
-
-# 可选：支持 xlsx/docx 文件写入（非 MD 格式）
-pip install openpyxl python-docx
+npx skills add 1908490231/feishu-document-writing --skill feishu-document-writing
 ```
 
-### 2. 配置凭证
+## 快速开始
+
+### 1. 配置凭证
 
 复制 `.env.example` 为 `.env`，填入飞书应用凭证：
 
@@ -45,7 +42,7 @@ FEISHU_DEFAULT_WIKI_SPACE_ID=你的知识库space_id
 FEISHU_DEFAULT_WIKI_NODE_TOKEN=你的知识库node_token
 ```
 
-### 3. 获取飞书凭证
+### 2. 获取飞书凭证
 
 1. 访问 [飞书开放平台](https://open.feishu.cn/app)
 2. 创建企业自建应用
@@ -55,7 +52,7 @@ FEISHU_DEFAULT_WIKI_NODE_TOKEN=你的知识库node_token
    - `drive:drive` - 云空间文件访问
    - `wiki:wiki` - 知识库管理（如需写入知识库）
 
-### 4. 将应用添加为协作者
+### 3. 将应用添加为协作者
 
 **重要**：应用需要被添加为目标知识库/文件夹的协作者才能写入内容。不同目标的授权方式不同。
 
@@ -83,7 +80,7 @@ FEISHU_DEFAULT_WIKI_NODE_TOKEN=你的知识库node_token
 
 完成后，应用机器人通过"群成员"身份获得该文件夹的访问权限。
 
-### 5. 使用
+### 4. 使用
 
 ```bash
 # 写入 MD 到知识库（推荐，使用 .env 中配置的默认知识库）
@@ -465,6 +462,10 @@ POST /docx/v1/documents/{document_id}/blocks/{cell_block_id}/children
 |------|------|----------|
 | 只有第一列有内容 | 误以为表格子块是行 | 直接遍历所有单元格，按行优先顺序填充 |
 | 部分单元格为空 | API 调用过快被限流 | 每次填充后添加 100ms 延时 |
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=1908490231/feishu-document-writing&type=Date)](https://www.star-history.com/#1908490231/feishu-document-writing&Date)
 
 ## 许可证
 
