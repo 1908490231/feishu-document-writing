@@ -120,6 +120,10 @@ class MarkdownParser:
 
             i += 1
 
+        # 过滤掉占位符块（__IMAGE_PLACEHOLDER__ 和 __TABLE_PLACEHOLDER__）
+        # 这些占位符只用于记录位置，实际写入由 pending_images 和 pending_tables 处理
+        blocks = [b for b in blocks if b.get("block_type") not in (self.IMAGE_PLACEHOLDER, self.TABLE_PLACEHOLDER)]
+
         return blocks
 
     def _parse_table(self, lines: List[str], start_idx: int) -> Tuple[List[List[str]], int]:
@@ -242,14 +246,24 @@ class MarkdownParser:
                 })
             # 链接
             elif match.group(7) and match.group(8):
-                elements.append({
-                    "text_run": {
-                        "content": match.group(7),
-                        "text_element_style": {
-                            "link": {"url": match.group(8)}
+                url = match.group(8)
+                # 跳过锚点链接（以 # 开头），飞书不支持中文锚点
+                if url.startswith('#'):
+                    # 只保留文本，不添加链接
+                    elements.append({
+                        "text_run": {
+                            "content": match.group(7)
                         }
-                    }
-                })
+                    })
+                else:
+                    elements.append({
+                        "text_run": {
+                            "content": match.group(7),
+                            "text_element_style": {
+                                "link": {"url": url}
+                            }
+                        }
+                    })
 
             last_end = match.end()
 

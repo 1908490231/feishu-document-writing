@@ -177,6 +177,17 @@ class FeishuDocWriter:
                 if resp.status_code in (400, 429, 500, 503) and attempt < max_retries:
                     time.sleep(2 * attempt)
                     continue
+
+                # 添加详细错误日志
+                if resp.status_code != 200:
+                    print(f"[DEBUG] HTTP {resp.status_code} 错误 (batch {i//batch_size + 1}, blocks {i}-{i+len(batch)})")
+                    print(f"[DEBUG] 响应内容: {resp.text}")
+                    # 只打印前3个block的详细信息，避免输出过长
+                    import json
+                    print(f"[DEBUG] 批次中前3个blocks:")
+                    for idx, blk in enumerate(batch[:3]):
+                        print(f"  Block {i+idx}: block_type={blk.get('block_type')}, keys={list(blk.keys())}")
+
                 resp.raise_for_status()
                 result = resp.json()
                 if result.get("code") != 0:
@@ -184,6 +195,7 @@ class FeishuDocWriter:
                         time.sleep(2 * attempt)
                         continue
                     print(f"警告: 写入部分内容失败: {result.get('msg')}")
+                    print(f"[DEBUG] 完整响应: {result}")
                     return False
                 break
 
@@ -595,19 +607,23 @@ class FeishuDocWriter:
             ]
         }
 
-        max_retries = 3
+        max_retries = 5
         for attempt in range(1, max_retries + 1):
             try:
                 resp = requests.post(url, headers=self._headers(), json=data, timeout=self.REQUEST_TIMEOUT)
-                if resp.status_code in (400, 429, 500, 503) and attempt < max_retries:
-                    time.sleep(1.5 * attempt)
+                # 429 限流等待更长时间
+                if resp.status_code == 429 and attempt < max_retries:
+                    time.sleep(5 * attempt)
+                    continue
+                if resp.status_code in (500, 503) and attempt < max_retries:
+                    time.sleep(3 * attempt)
                     continue
                 resp.raise_for_status()
                 result = resp.json()
 
                 if result.get("code") != 0:
                     if attempt < max_retries:
-                        time.sleep(1.5 * attempt)
+                        time.sleep(2 * attempt)
                         continue
                     print(f"填充单元格失败: code={result.get('code')}, msg={result.get('msg')}")
                     return False
@@ -615,7 +631,7 @@ class FeishuDocWriter:
                 return True
             except Exception as e:
                 if attempt < max_retries:
-                    time.sleep(1.5 * attempt)
+                    time.sleep(2 * attempt)
                     continue
                 print(f"填充单元格异常: {e}")
                 return False
@@ -635,7 +651,7 @@ class FeishuDocWriter:
         """
         try:
             # 等待表格创建完成
-            time.sleep(0.5)
+            time.sleep(1.0)
 
             # 获取表格的所有单元格（飞书表格的子块直接就是单元格，按行优先顺序排列）
             url = f"{self.BASE_URL}/docx/v1/documents/{document_id}/blocks/{table_block_id}/children"
@@ -672,8 +688,8 @@ class FeishuDocWriter:
                         success = self.fill_table_cell(document_id, cell_id, content)
                         if not success:
                             print(f"警告: 填充单元格 [{row_idx}][{col_idx}] 失败")
-                        # 添加小延时避免 API 限流
-                        time.sleep(0.1)
+                        # 单元格间延时，避免并发上传时触发限流
+                        time.sleep(0.3)
 
             return True
         except Exception as e:
